@@ -27,18 +27,20 @@ var (
 
 type model struct {
 	mode     string
+	filename string
+	text     string
 	ready    bool
 	viewport viewport.Model
 }
 
 func (m model) headerView() string {
-	title := titleStyle.Render("Mr. Pager")
+	title := titleStyle.Render(m.filename)
 	line := strings.Repeat("─", max(0, m.viewport.Width-lipgloss.Width(title)))
 	return lipgloss.JoinHorizontal(lipgloss.Center, title, line)
 }
 
 func (m model) footerView() string {
-	info := infoStyle.Render(fmt.Sprintf("%3.f%%", m.viewport.ScrollPercent()*100))
+	info := infoStyle.Render(fmt.Sprintf("%s %3.f%%", m.mode, m.viewport.ScrollPercent()*100))
 	line := strings.Repeat("─", max(0, m.viewport.Width-lipgloss.Width(info)))
 	return lipgloss.JoinHorizontal(lipgloss.Center, line, info)
 }
@@ -54,6 +56,11 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var (
+		cmd  tea.Cmd
+		cmds []tea.Cmd
+	)
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -77,7 +84,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport = viewport.New(msg.Width, msg.Height-verticalMarginHeight)
 			m.viewport.YPosition = headerHeight
 			m.viewport.HighPerformanceRendering = true
-			m.viewport.SetContent(m.mode)
+			log.Info(m.text)
+			m.viewport.SetContent(m.text)
 			m.ready = true
 
 			// This is only necessary for high performance rendering, which in
@@ -90,19 +98,37 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.Height = msg.Height - verticalMarginHeight
 		}
 
+		// Render (or re-render) the whole viewport. Necessary both to
+		// initialize the viewport and when the window is resized.
+		//
+		// This is needed for high-performance rendering only.
+		cmds = append(cmds, viewport.Sync(m.viewport))
 	}
 
-	return m, nil
+	m.viewport, cmd = m.viewport.Update(msg)
+	cmds = append(cmds, cmd)
+
+	return m, tea.Batch(cmds...)
 }
 
 func (m model) View() string {
-	return fmt.Sprintf("Curent Mode is :%s", m.mode)
+	if !m.ready {
+		return "\n  Initializing..."
+	}
+	return fmt.Sprintf("%s\n%s\n%s", m.headerView(), m.viewport.View(), m.footerView())
 }
 
 func main() {
+	filepath := os.Args[1]
+	file, err := os.ReadFile(filepath)
+	if err != nil {
+		log.Error(err)
+		os.Exit(1)
+	}
+
 	p := tea.NewProgram(
-		model{mode: "NORMAL"},
-		tea.WithAltScreen(),       // use the full size of the terminal in its "alternate screen buffer"
+		model{mode: "NORMAL", filename: filepath, text: string(file)},
+		tea.WithAltScreen(),       // use the ull ize of the terminal in its "alternate screen buffer"
 		tea.WithMouseCellMotion(), // turn on mouse support so we can track the mouse wheel
 	)
 
